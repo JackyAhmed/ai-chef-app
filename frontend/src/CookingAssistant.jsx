@@ -5868,6 +5868,10 @@ export default function CookingAssistant() {
   const [visionInsights, setVisionInsights] = useState([]);
   const [currentAnalysis, setCurrentAnalysis] = useState(null);
   const [detectedIngredients, setDetectedIngredients] = useState([]);
+  const [scanMode, setScanMode] = React.useState(null);
+  const [scanResult, setScanResult] = React.useState(null);
+  const [isScanningObjects, setIsScanningObjects] = React.useState(false);
+  const [trackedIngredients, setTrackedIngredients] = React.useState([]);
   const [cookingState, setCookingState] = useState("");
   const [aiSuggestion, setAiSuggestion] = useState("");
   const [voiceCommand, setVoiceCommand] = useState("");
@@ -6334,7 +6338,82 @@ What do you see? Am I on track for this step?`,
   }, [visionEnabled, cameraActive, selectedRecipe, currentStep, captureFrame, samplePixels,
       conversationHistory, voiceEnabled]);
 
-  const parseAIResponse = (text) => {
+  // ── Object Detection: scan what's in front of the camera ─────────────────
+  const scanObjects = React.useCallback(async (mode) => {
+    if (!cameraActive) { speakText("Please turn on the camera first.", true); return; }
+    const rawCanvas = captureFrame();
+    if (!rawCanvas) { speakText("Could not capture frame.", true); return; }
+
+    setIsScanningObjects(true);
+    setScanMode(mode);
+    setScanResult(null);
+
+    // Resize frame for API
+    const outCanvas = document.createElement("canvas");
+    const maxDim = 800;
+    const scale = Math.min(1, maxDim / Math.max(rawCanvas.width, rawCanvas.height));
+    outCanvas.width = Math.round(rawCanvas.width * scale);
+    outCanvas.height = Math.round(rawCanvas.height * scale);
+    outCanvas.getContext("2d").drawImage(rawCanvas, 0, 0, outCanvas.width, outCanvas.height);
+    const base64Data = outCanvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+
+    const prompts = {
+      ingredients: `Look at this image and identify ALL food ingredients, produce, and cooking items you can see.
+Respond ONLY in this exact JSON format (no markdown, no explanation):
+{
+  "items": ["item1", "item2", ...],
+  "recipes": ["Recipe Name 1", "Recipe Name 2", "Recipe Name 3"],
+  "tip": "One short cooking tip based on these ingredients"
+}`,
+      identify: `Identify every object visible in this image. Include food, kitchen tools, appliances, and any other items.
+Respond ONLY in this exact JSON format:
+{
+  "items": [{"name": "item name", "detail": "brief description"}],
+  "tip": "Any relevant cooking or safety tip about what you see"
+}`,
+      track: `Compare what you see to a kitchen cooking session. List every ingredient or food item visible.
+Respond ONLY in this exact JSON format:
+{
+  "items": ["ingredient1", "ingredient2", ...],
+  "used": ["items that look partially used or prepared"],
+  "tip": "Brief note on what's ready vs still needs prep"
+}`,
+    };
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/detect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, image: base64Data }),
+      });
+      const parsed = await res.json();
+
+      setScanResult({ ...parsed, mode });
+
+      // Update tracked ingredients list
+      if (mode === "track" && parsed.items?.length) {
+        setTrackedIngredients(prev => {
+          const combined = [...new Set([...prev, ...parsed.items])];
+          return combined;
+        });
+      }
+
+      // Speak a summary
+      if (mode === "ingredients" && parsed.items?.length) {
+        speakText(`I can see ${parsed.items.slice(0, 4).join(", ")}. You could make: ${parsed.recipes?.slice(0, 2).join(" or ")}.`, true);
+      } else if (mode === "identify" && parsed.items?.length) {
+        speakText(`I can see ${parsed.items.slice(0, 4).map(i => i.name || i).join(", ")}.`, true);
+      } else if (mode === "track" && parsed.items?.length) {
+        speakText(`Tracking ${parsed.items.length} ingredients. ${parsed.tip || ""}`, true);
+      }
+
+    } catch (err) {
+      setScanResult({ error: "Could not analyse the image. Try again." });
+      speakText("Sorry, I couldn't analyse the image.", true);
+    } finally {
+      setIsScanningObjects(false);
+    }
+  }, [cameraActive, captureFrame, speakText]);
     // OBSERVATION: what the model sees
     const m0 = text.match(/OBSERVATION:\s*(.+?)(?=STATE:|$)/is);
     // STATE: cooking state
@@ -6478,47 +6557,16 @@ What do you see? Am I on track for this step?`,
       ? `Recipe: "${selectedRecipe.name}". Current step ${currentStep + 1} of ${selectedRecipe.steps.length}: "${selectedRecipe.steps[currentStep]?.text}". Step duration: ${selectedRecipe.steps[currentStep]?.duration || "none"} minutes.`
       : "No recipe active.";
 
-    const systemPrompt = `You are a voice command interpreter for a cooking assistant app.
-The user is cooking and spoke a command. Based on their words and the current cooking context, decide what action to take.
-
-Current cooking context:
-${stepInfo}
-
-Available actions (respond with ONLY the action name, nothing else):
-- NEXT_STEP — go to the next recipe step
-- PREVIOUS_STEP — go back to the previous step
-- REPEAT_STEP — read the current step again
-- START_TIMER — start the countdown timer for this step
-- ANALYZE — use camera to analyze the food
-- START_CAMERA — turn on the camera
-- STOP_CAMERA — turn off the camera
-- CURRENT_STEP — tell the user which step they're on
-- INGREDIENTS — list the ingredients
-- HOW_LONG — tell the user how long this step takes
-- GO_HOME — stop cooking and go back to recipe list
-- HELP — list available commands
-- UNKNOWN — the command doesn't match any cooking action
-
-Respond with ONLY the action name. No explanation, no punctuation, just the action.`;
-
     let intent = "UNKNOWN";
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch(`${API_BASE_URL}/api/intent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 20,
-          system: systemPrompt,
-          messages: [{ role: "user", content: cmd }],
-        }),
+        body: JSON.stringify({ transcript: cmd, context: stepInfo }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        intent = (data.content?.[0]?.text || "").trim().toUpperCase().replace(/[^A-Z_]/g, "");
-      }
+      const data = await res.json();
+      intent = data.intent || "UNKNOWN";
     } catch {
-      // Network error — fall back to simple keyword matching below
       intent = "FALLBACK";
     }
 
@@ -8760,6 +8808,146 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
 
               <div style={{ display: "none" }}>{/* removed fixed command chips */}</div>
               </div>
+            </div>
+
+            {/* ── Object Detection Panel ── */}
+            <div style={{
+              background: "#1c1917", borderRadius: 20, padding: "1.25rem",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 700, fontSize: "0.85rem", color: "#34d399", marginBottom: "1rem" }}>
+                🔍 Object Detection
+              </div>
+
+              {/* 3 mode buttons */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                {[
+                  { mode: "ingredients", label: "🥕 Scan Ingredients & Suggest Recipes", color: "#f59e0b" },
+                  { mode: "identify",    label: "👁 Identify Everything in View",        color: "#818cf8" },
+                  { mode: "track",       label: "📋 Track Ingredients I'm Using",        color: "#34d399" },
+                ].map(({ mode, label, color }) => (
+                  <button key={mode}
+                    onClick={() => { if (!isScanningObjects) scanObjects(mode); }}
+                    disabled={isScanningObjects || !cameraActive}
+                    style={{
+                      padding: "0.6rem 1rem", borderRadius: 12, border: "none",
+                      background: scanMode === mode && isScanningObjects ? color + "33" : "rgba(255,255,255,0.05)",
+                      color: cameraActive ? color : "#57534e",
+                      fontWeight: 600, cursor: cameraActive ? "pointer" : "not-allowed",
+                      fontFamily: "inherit", fontSize: "0.78rem", textAlign: "left",
+                      transition: "all 0.2s",
+                      opacity: isScanningObjects && scanMode !== mode ? 0.4 : 1,
+                    }}
+                  >
+                    {isScanningObjects && scanMode === mode ? "⏳ Scanning..." : label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Camera required hint */}
+              {!cameraActive && (
+                <div style={{ fontSize: "0.72rem", color: "#78716c", marginBottom: "0.5rem" }}>
+                  📷 Turn on camera above to use object detection
+                </div>
+              )}
+
+              {/* Scan Results */}
+              {scanResult && !isScanningObjects && (
+                <div style={{
+                  background: "rgba(255,255,255,0.04)", borderRadius: 12,
+                  padding: "0.75rem", marginTop: "0.5rem",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                }}>
+                  {scanResult.error ? (
+                    <div style={{ color: "#f87171", fontSize: "0.78rem" }}>{scanResult.error}</div>
+                  ) : (
+                    <>
+                      {/* Items detected */}
+                      {scanResult.items?.length > 0 && (
+                        <div style={{ marginBottom: "0.6rem" }}>
+                          <div style={{ fontSize: "0.7rem", color: "#78716c", fontWeight: 700, marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            {scanResult.mode === "identify" ? "Objects Found" : "Ingredients Found"}
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                            {(scanResult.items || []).map((item, i) => (
+                              <span key={i} style={{
+                                background: "rgba(52,211,153,0.12)", color: "#34d399",
+                                fontSize: "0.72rem", padding: "3px 10px", borderRadius: 50,
+                                border: "1px solid rgba(52,211,153,0.2)",
+                              }}>
+                                {typeof item === "object" ? item.name : item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Recipe suggestions */}
+                      {scanResult.recipes?.length > 0 && (
+                        <div style={{ marginBottom: "0.6rem" }}>
+                          <div style={{ fontSize: "0.7rem", color: "#78716c", fontWeight: 700, marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            You Could Make
+                          </div>
+                          {scanResult.recipes.map((r, i) => (
+                            <div key={i} style={{ fontSize: "0.78rem", color: "#e7e5e4", padding: "2px 0" }}>🍳 {r}</div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Used ingredients (track mode) */}
+                      {scanResult.used?.length > 0 && (
+                        <div style={{ marginBottom: "0.6rem" }}>
+                          <div style={{ fontSize: "0.7rem", color: "#78716c", fontWeight: 700, marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            Already Used / Prepped
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                            {scanResult.used.map((item, i) => (
+                              <span key={i} style={{
+                                background: "rgba(251,191,36,0.12)", color: "#fbbf24",
+                                fontSize: "0.72rem", padding: "3px 10px", borderRadius: 50,
+                                border: "1px solid rgba(251,191,36,0.2)",
+                              }}>{item}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tip */}
+                      {scanResult.tip && (
+                        <div style={{
+                          fontSize: "0.75rem", color: "#a8a29e", marginTop: "0.4rem",
+                          padding: "0.5rem 0.6rem", background: "rgba(255,255,255,0.03)",
+                          borderRadius: 8, borderLeft: "2px solid #34d399",
+                        }}>
+                          💡 {scanResult.tip}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Tracked ingredients across scans */}
+              {trackedIngredients.length > 0 && (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <div style={{ fontSize: "0.7rem", color: "#78716c", fontWeight: 700, marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Total Tracked This Session
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                    {trackedIngredients.map((item, i) => (
+                      <span key={i} style={{
+                        background: "rgba(129,140,248,0.12)", color: "#818cf8",
+                        fontSize: "0.68rem", padding: "2px 8px", borderRadius: 50,
+                        border: "1px solid rgba(129,140,248,0.2)",
+                      }}>{item}</span>
+                    ))}
+                  </div>
+                  <button onClick={() => setTrackedIngredients([])} style={{
+                    marginTop: "0.4rem", fontSize: "0.65rem", color: "#57534e",
+                    background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+                  }}>clear tracking</button>
+                </div>
+              )}
             </div>
 
             {/* Voice Profile */}
