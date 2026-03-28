@@ -6418,9 +6418,8 @@ What do you see? Am I on track for this step?`,
     if (!voiceEnabled && !forceSpeak) return;
     if (!text) return;
 
-    // Pause mic BEFORE speaking — prevents Android WebView mic flicker
+    // Mark speaking — mic onend handler will skip auto-restart while this is true
     isSpeakingRef.current = true;
-    pauseMicForSpeech();
 
     // Stop any currently playing audio
     if (currentAudio) { currentAudio.pause(); currentAudio = null; }
@@ -6430,7 +6429,7 @@ What do you see? Am I on track for this step?`,
 
     const onSpeechDone = () => {
       isSpeakingRef.current = false;
-      resumeMicAfterSpeech();
+      // Mic was never stopped — it keeps running. Nothing to restart.
     };
 
     if (backendStatus.elevenLabsConfigured && profile.elevenId) {
@@ -6646,14 +6645,22 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
     recognition.onstart = () => { setMicListening(true); setMicError(""); };
 
     recognition.onend = () => {
-      // If TTS is currently playing, don't update the visual state —
-      // we'll restart automatically once speech is done via resumeMicAfterSpeech()
-      if (isSpeakingRef.current) return;
+      // During TTS playback, Android WebView may fire onend spuriously.
+      // Don't update visual state or restart — mic is still fine.
+      if (isSpeakingRef.current) {
+        // Restart silently so it keeps listening through TTS
+        setTimeout(() => {
+          if (recognitionRef.current) {
+            try { recognitionRef.current.start(); } catch {}
+          }
+        }, 300);
+        return;
+      }
       setMicListening(false);
-      // Auto-restart ONLY if we still intend to listen (ref not nulled by stopMicListening)
+      // Auto-restart if we still intend to listen (ref not nulled by stopMicListening)
       if (recognitionRef.current) {
         setTimeout(() => {
-          if (recognitionRef.current && !isSpeakingRef.current) {
+          if (recognitionRef.current) {
             try { recognitionRef.current.start(); } catch {}
           }
         }, 300);
