@@ -1,0 +1,343 @@
+====================================================
+  🍳 COOKING ASSISTANT — DEPLOYMENT GUIDE
+====================================================
+Version: 1.0  |  Stack: React + Express + OpenAI
+====================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 1 — LOCAL SETUP (WINDOWS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Prerequisites
+  • Node.js 20 or later — https://nodejs.org  (LTS version)
+  • A text editor (Notepad, VS Code, etc.)
+  • Your OpenAI API key — https://platform.openai.com/api-keys
+
+Steps
+  1. Extract this ZIP to any folder, e.g. C:\cooking-assistant
+  2. Open the "backend" folder and copy ".env.example" → ".env"
+  3. Edit "backend\.env" and replace:
+       OPENAI_API_KEY=your_openai_api_key_here
+     with your actual key.
+  4. Double-click "start-windows.bat"
+     • First run installs dependencies and builds the frontend (~2 min)
+     • Subsequent runs start in seconds
+  5. Open your browser to: http://localhost:3001
+  6. On Android: open http://<your-PC-IP>:3001 in Chrome, tap
+     the browser menu → "Add to Home Screen" to install as an app.
+
+To find your PC's local IP:
+  Press Win+R, type "cmd", run: ipconfig
+  Look for "IPv4 Address" under your Wi-Fi or Ethernet adapter.
+
+Stop the server: press Ctrl+C in the terminal window.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 2 — ANDROID (PWA — NO APP STORE NEEDED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The app is a Progressive Web App (PWA). Once your server is live
+on the internet (see Sections 3 or 4), Android users can install it
+like a native app — no Play Store required.
+
+  1. Open Chrome on Android and navigate to your app's URL
+  2. Tap the three-dot menu (⋮) in the top-right corner
+  3. Tap "Add to Home screen"
+  4. Name the shortcut and tap "Add"
+
+The app will appear on your home screen with the cooking icon and
+open full-screen (no browser chrome), just like a native app.
+Camera and microphone features work the same as in-browser.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 3 — FREE HOSTING (No credit card required)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OPTION A — Render.com (Recommended free tier)
+─────────────────────────────────────────────
+Render gives you a free Web Service that auto-deploys from GitHub.
+The free tier sleeps after 15 min of inactivity (cold start ~30 sec).
+
+  1. Create a free account at https://render.com
+
+  2. Push this project to a GitHub repository:
+       git init
+       git add .
+       git commit -m "initial commit"
+       # Create a repo on github.com, then:
+       git remote add origin https://github.com/YOUR_USER/cooking-assistant.git
+       git push -u origin main
+
+  3. In Render dashboard → "New +" → "Web Service"
+     Connect your GitHub repo.
+
+  4. Configure:
+       Root Directory:    (leave blank — root of repo)
+       Runtime:           Node
+       Build Command:     npm run setup && npm run build
+       Start Command:     npm run start
+       Branch:            main
+
+  5. Add environment variables (in Render → Environment tab):
+       OPENAI_API_KEY        = your_key_here
+       OPENAI_MODEL          = gpt-4o-mini
+       PORT                  = 3001
+       FRONTEND_ORIGIN       = https://your-app-name.onrender.com
+       NODE_VERSION          = 20
+
+  6. Click "Deploy". Render will build and deploy automatically.
+     Your public URL will be: https://your-app-name.onrender.com
+
+  Notes:
+   • Free tier: 750 hrs/month (enough for personal use)
+   • Custom domain: available even on free tier (CNAME your domain)
+   • To prevent sleeping: use https://uptimerobot.com to ping every 10 min
+
+
+OPTION B — Railway.app
+──────────────────────
+Railway gives $5 free credit/month (no credit card required to start).
+
+  1. Go to https://railway.app and sign up with GitHub
+  2. Click "New Project" → "Deploy from GitHub repo"
+  3. Select your repo
+  4. Railway auto-detects Node.js. Set environment variables:
+       OPENAI_API_KEY  = your_key_here
+       OPENAI_MODEL    = gpt-4o-mini
+       PORT            = 3001
+  5. In Settings → Networking, click "Generate Domain"
+  6. Your app is live at the generated railway.app URL
+
+
+OPTION C — Fly.io (Free tier, Docker-based)
+────────────────────────────────────────────
+  1. Install flyctl: https://fly.io/docs/hands-on/install-flyctl/
+  2. Run: fly auth signup
+  3. In the project root, run: fly launch
+     (accept defaults, choose a region near you)
+  4. Set secrets:
+       fly secrets set OPENAI_API_KEY=your_key_here
+       fly secrets set OPENAI_MODEL=gpt-4o-mini
+  5. Deploy: fly deploy
+  6. Open: fly open
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 4 — PAID HOSTING WITH CUSTOM DOMAIN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OPTION A — VPS (DigitalOcean / Hetzner / Linode)
+─────────────────────────────────────────────────
+Recommended for full control, best performance, lowest cost at scale.
+
+Cost: ~$4–6/month (Hetzner CX22 or DigitalOcean Basic Droplet)
+
+  1. CREATE SERVER
+     DigitalOcean: https://cloud.digitalocean.com → Create Droplet
+       Image:  Ubuntu 24.04 LTS
+       Size:   Basic / Regular — $6/mo (1 vCPU, 1GB RAM)
+       Region: Choose closest to your users
+
+  2. CONNECT VIA SSH
+       ssh root@YOUR_SERVER_IP
+
+  3. INSTALL NODE.JS 20
+       curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+       sudo apt-get install -y nodejs
+
+  4. INSTALL PM2 (keeps app running 24/7)
+       npm install -g pm2
+
+  5. UPLOAD YOUR APP
+     Option 1 — Git (recommended):
+       git clone https://github.com/YOUR_USER/cooking-assistant.git
+       cd cooking-assistant
+
+     Option 2 — SCP (direct file transfer from your PC):
+       scp -r cooking-assistant/ root@YOUR_SERVER_IP:/root/
+
+  6. CONFIGURE ENVIRONMENT
+       cd cooking-assistant/backend
+       cp .env.example .env
+       nano .env
+     Set:
+       OPENAI_API_KEY=your_key_here
+       OPENAI_MODEL=gpt-4o-mini
+       PORT=3001
+       FRONTEND_ORIGIN=https://yourdomain.com
+
+  7. INSTALL AND BUILD
+       cd /root/cooking-assistant
+       npm run setup        # installs all dependencies
+       npm run build        # builds the React frontend
+
+  8. START WITH PM2
+       cd backend
+       pm2 start server.js --name cooking-assistant
+       pm2 save
+       pm2 startup          # follow the command it outputs to auto-start on reboot
+
+  9. SET UP NGINX AS REVERSE PROXY
+       sudo apt install nginx -y
+
+     Create config file:
+       sudo nano /etc/nginx/sites-available/cooking-assistant
+
+     Paste this content (replace yourdomain.com):
+     ┌─────────────────────────────────────────────────────┐
+     │ server {                                            │
+     │     listen 80;                                      │
+     │     server_name yourdomain.com www.yourdomain.com;  │
+     │                                                     │
+     │     location / {                                    │
+     │         proxy_pass http://localhost:3001;           │
+     │         proxy_http_version 1.1;                     │
+     │         proxy_set_header Upgrade $http_upgrade;     │
+     │         proxy_set_header Connection 'upgrade';      │
+     │         proxy_set_header Host $host;                │
+     │         proxy_cache_bypass $http_upgrade;           │
+     │         proxy_read_timeout 300s;                    │
+     │     }                                               │
+     │ }                                                   │
+     └─────────────────────────────────────────────────────┘
+
+       sudo ln -s /etc/nginx/sites-available/cooking-assistant /etc/nginx/sites-enabled/
+       sudo nginx -t
+       sudo systemctl restart nginx
+
+  10. ADD FREE SSL (HTTPS) WITH LET'S ENCRYPT
+       sudo apt install certbot python3-certbot-nginx -y
+       sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+     Follow the prompts. Certbot auto-renews the certificate.
+
+  11. POINT YOUR DOMAIN TO THE SERVER
+     In your domain registrar's DNS settings, add:
+       Type: A
+       Name: @  (or your subdomain, e.g. "cook")
+       Value: YOUR_SERVER_IP
+       TTL: 300
+
+     Also add for www:
+       Type: A
+       Name: www
+       Value: YOUR_SERVER_IP
+
+     DNS propagation takes 5–60 minutes.
+
+  Your app is now live at: https://yourdomain.com
+
+
+OPTION B — Render Pro / Railway Pro (Managed, no server admin)
+──────────────────────────────────────────────────────────────
+If you don't want to manage a server:
+
+  Render Starter plan — $7/month
+    • No sleep on inactivity
+    • Custom domain with auto SSL
+    • 512MB RAM, 0.5 CPU
+    • Same setup as Section 3 Option A, just upgrade the plan
+
+  Railway Hobby plan — $5/month + usage
+    • Auto-deploys from GitHub
+    • Custom domain with auto SSL
+    • Usage-based pricing (very cheap for low traffic)
+
+  For custom domain on either:
+    • Go to your service settings → Custom Domain
+    • Add your domain name
+    • They provide a CNAME value to add in your DNS registrar
+    • SSL is provisioned automatically
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 5 — ENVIRONMENT VARIABLES REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Variable              Required   Description
+  ─────────────────────────────────────────────────────────────────
+  OPENAI_API_KEY        YES        Your OpenAI API key
+                                   Get it: https://platform.openai.com/api-keys
+  OPENAI_MODEL          no         Model to use (default: gpt-4o-mini)
+                                   Options: gpt-4o-mini (fast/cheap)
+                                            gpt-4o (smarter, costs more)
+  PORT                  no         Backend port (default: 3001)
+  FRONTEND_ORIGIN       no         Your frontend URL for CORS
+                                   Set to your public domain in production
+  ELEVENLABS_API_KEY    no         For realistic voice TTS (optional)
+                                   Get it: https://elevenlabs.io
+                                   Without it, the browser's built-in
+                                   speech synthesis is used as fallback
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 6 — UPDATING THE APP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  If you make changes to the frontend source code, rebuild it:
+    cd frontend
+    npm run build
+
+  Then restart the backend (it serves the new build):
+    pm2 restart cooking-assistant   (on VPS)
+    — or just restart the server locally
+
+  On Render/Railway: just push to GitHub — it auto-deploys.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 7 — COSTS SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Option                  Monthly Cost    Notes
+  ──────────────────────────────────────────────────────────────
+  Local (Windows PC)      $0              Accessible on home network only
+  Render Free             $0              Sleeps after 15 min idle
+  Railway Free            $0              $5 credit, then usage billing
+  Fly.io Free             $0              3 small VMs free
+  Render Starter          ~$7             No sleep, custom domain
+  Hetzner CX22 VPS        ~$4             Full control, best value
+  DigitalOcean Droplet    ~$6             Easy UI, good docs
+  Railway Hobby           ~$5 + usage     Easiest managed option
+
+  OpenAI API costs (separate from hosting):
+    gpt-4o-mini: ~$0.15/million input tokens, $0.60/million output
+    For casual cooking use: typically < $1/month
+    Vision (camera) calls: ~$0.01–0.05 per image analyzed
+    Set a spending limit at: https://platform.openai.com/settings/organization/limits
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 8 — TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Problem: "OPENAI_API_KEY missing" on health check
+  Solution: Make sure backend/.env exists and has the key.
+            Restart the backend after editing .env
+
+  Problem: Camera doesn't work
+  Solution: Camera requires HTTPS in production. Localhost is exempt.
+            On your server, ensure certbot SSL is set up (Section 4 Step 10).
+
+  Problem: Vision AI gives no response
+  Solution: Check the browser console (F12) for errors.
+            Confirm the backend is running: visit /api/health in browser.
+            Confirm your OpenAI key has GPT-4o access (not just GPT-3.5).
+
+  Problem: App won't install on Android
+  Solution: The app must be served over HTTPS (not plain http).
+            Make sure your server has SSL configured.
+
+  Problem: "Port 3001 already in use"
+  Solution: Change PORT in backend/.env to e.g. 3002, rebuild and restart.
+
+  Problem: Frontend shows blank/white screen
+  Solution: Run "npm run build" inside the frontend folder,
+            then restart the backend.
+
+
+====================================================
+  Need help? Review the README or open an issue on GitHub.
+====================================================

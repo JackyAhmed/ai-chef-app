@@ -1,0 +1,35 @@
+/*
+ * auth-animations.css
+ * Add this to your main CSS file (e.g. frontend/src/index.css)
+ * OR use the tailwind.config.js approach below.
+ */
+
+/* ── Option 1: plain CSS (add to index.css or main stylesheet) ── */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+
+/*
+ * ── Option 2: Tailwind config (add to tailwind.config.js) ───────
+ *
+ * module.exports = {
+ *   theme: {
+ *     extend: {
+ *       keyframes: {
+ *         'slide-in-right': {
+ *           from: { transform: 'translateX(100%)' },
+ *           to:   { transform: 'translateX(0)' },
+ *         },
+ *       },
+ *       animation: {
+ *         'slide-in-right': 'slide-in-right 0.25s ease-out',
+ *       },
+ *     },
+ *   },
+ * };
+ */

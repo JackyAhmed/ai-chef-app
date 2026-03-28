@@ -1,0 +1,14 @@
+{
+  "name": "cooking-assistant",
+  "private": true,
+  "version": "1.0.0",
+  "description": "AI Cooking Assistant – Full-stack (React + Express + OpenAI)",
+  "scripts": {
+    "setup": "npm install --prefix backend && npm install --prefix frontend",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix backend run start",
+    "postinstall": "echo 'Run: npm run setup to install all dependencies'"
+  }
+}
