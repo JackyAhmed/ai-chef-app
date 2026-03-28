@@ -6397,23 +6397,6 @@ What do you see? Am I on track for this step?`,
   const formatTime = (seconds) =>
     `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")}`;
 
-  // ── Helper: pause mic during TTS so Android WebView doesn't flicker ───────
-  const pauseMicForSpeech = () => {
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-      // Don't null the ref — we want to restart after speech ends
-    }
-  };
-
-  const resumeMicAfterSpeech = () => {
-    // Only restart if we still intend to be listening (ref still set)
-    if (recognitionRef.current) {
-      setTimeout(() => {
-        try { recognitionRef.current?.start(); } catch {}
-      }, 400);
-    }
-  };
-
   const speakText = (text, forceSpeak = false) => {
     if (!voiceEnabled && !forceSpeak) return;
     if (!text) return;
@@ -6636,70 +6619,74 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
       recognitionRef.current = null;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;       // keep listening always
-    recognition.interimResults = false;  // only fire on final results
-    recognition.lang = "en-US";
-    recognition.maxAlternatives = 1;
+    // Use a separate active flag so onend always knows to restart
+    // This is the key fix for Android — continuous=true still times out on Android WebView
+    // so we recreate and restart the recognition instance every time it ends
+    const micActiveRef_local = recognitionRef; // reuse ref as "mic should be on" signal
 
-    recognition.onstart = () => { setMicListening(true); setMicError(""); };
+    const createAndStart = () => {
+      // If mic was intentionally stopped, ref will be null — bail out
+      if (!micActiveRef_local.current && micActiveRef_local.current !== "pending") return;
 
-    recognition.onend = () => {
-      // During TTS playback, Android WebView may fire onend spuriously.
-      // Don't update visual state or restart — mic is still fine.
-      if (isSpeakingRef.current) {
-        // Restart silently so it keeps listening through TTS
-        setTimeout(() => {
-          if (recognitionRef.current) {
-            try { recognitionRef.current.start(); } catch {}
-          }
-        }, 300);
-        return;
-      }
-      setMicListening(false);
-      // Auto-restart if we still intend to listen (ref not nulled by stopMicListening)
-      if (recognitionRef.current) {
-        setTimeout(() => {
-          if (recognitionRef.current) {
-            try { recognitionRef.current.start(); } catch {}
-          }
-        }, 300);
+      const rec = new SpeechRecognition();
+      rec.continuous = false;        // false is MORE reliable on Android — restart manually
+      rec.interimResults = false;
+      rec.lang = "en-US";
+      rec.maxAlternatives = 1;
+
+      rec.onstart = () => {
+        setMicListening(true);
+        setMicError("");
+        micActiveRef_local.current = rec; // update ref to current instance
+      };
+
+      rec.onend = () => {
+        // Always restart unless intentionally stopped (ref set to null)
+        if (micActiveRef_local.current) {
+          // Don't flicker the UI — keep showing as listening
+          setTimeout(() => {
+            if (micActiveRef_local.current) createAndStart();
+          }, 150); // tiny gap to avoid overlapping instances
+        } else {
+          setMicListening(false);
+        }
+      };
+
+      rec.onerror = (e) => {
+        if (e.error === "not-allowed") {
+          setMicError("Microphone access denied. Allow microphone permissions.");
+          micActiveRef_local.current = null;
+          setMicListening(false);
+          return;
+        }
+        // For no-speech, aborted, network errors — just restart
+        if (micActiveRef_local.current) {
+          setTimeout(() => {
+            if (micActiveRef_local.current) createAndStart();
+          }, 300);
+        }
+      };
+
+      rec.onresult = (event) => {
+        const transcript = event.results[event.results.length - 1][0].transcript.trim();
+        if (transcript && !isSpeakingRef.current) handleVoiceCommand(transcript);
+      };
+
+      try { rec.start(); } catch { 
+        // If start fails, retry after short delay
+        setTimeout(() => { if (micActiveRef_local.current) createAndStart(); }, 500);
       }
     };
 
-    recognition.onerror = (e) => {
-      if (e.error === "no-speech") return; // normal silence — ignore
-      if (e.error === "aborted") return;   // we stopped it intentionally — ignore
-      if (e.error === "not-allowed") {
-        setMicError("Microphone access denied. Allow microphone permissions.");
-        setMicListening(false);
-        recognitionRef.current = null;
-        return;
-      }
-      // For any other error, attempt restart after a brief pause
-      if (recognitionRef.current && !isSpeakingRef.current) {
-        setTimeout(() => {
-          try { recognitionRef.current?.start(); } catch {}
-        }, 500);
-      }
-    };
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[event.results.length - 1][0].transcript.trim();
-      if (transcript && !isSpeakingRef.current) handleVoiceCommand(transcript);
-    };
-
-    recognitionRef.current = recognition;
-    try { recognition.start(); } catch {}
+    recognitionRef.current = "pending"; // signal that mic should be on
+    createAndStart();
   };
 
   const stopMicListening = () => {
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-      recognitionRef.current = null;
-    }
+    recognitionRef.current = null; // signal to stop restarting
     isSpeakingRef.current = false;
     setMicListening(false);
+    // The current rec instance will fire onend, see null ref, and stop
   };
 
   const toggleMic = () => {
@@ -8652,7 +8639,7 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
               </div>
             </div>
 
-            {/* Voice Commands */}
+            {/* Voice Commands — Natural Language AI Chat */}
             <div
               style={{
                 background: "#1c1917",
@@ -8661,19 +8648,11 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
                 border: micListening ? `1px solid ${region?.color || "#f59e0b"}55` : "1px solid rgba(255,255,255,0.08)",
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                  fontWeight: 700,
-                  fontSize: "0.85rem",
-                  color: "#a8a29e",
-                  marginBottom: "1rem",
-                }}
-              >
-                <Mic size={15} /> Voice Commands
-              </div>
+              {/* Header row: title + mic toggle */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 700, fontSize: "0.85rem", color: "#a8a29e" }}>
+                  <Mic size={15} /> Talk to your Chef AI
+                </div>
                 <button
                   onClick={toggleMic}
                   style={{
@@ -8681,7 +8660,7 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
                     padding: "0.35rem 0.85rem", borderRadius: 50, border: "none",
                     background: micListening ? (region?.color || "#f59e0b") : "rgba(255,255,255,0.08)",
                     color: micListening ? "#fff" : "#78716c",
-                    fontSize: "0.75rem", fontWeight: 700, cursor: "pointer",
+                    fontSize: "0.72rem", fontWeight: 700, cursor: "pointer",
                     fontFamily: "inherit", transition: "all 0.2s",
                   }}
                 >
@@ -8693,34 +8672,53 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
                   }} />
                   {micListening ? "Listening..." : "Start Mic"}
                 </button>
-              {micListening && lastHeard && (
+              </div>
+
+              {/* Status messages */}
+              {micError && (
+                <div style={{ fontSize: "0.72rem", color: "#f87171", marginBottom: "0.5rem" }}>{micError}</div>
+              )}
+              {micListening && (
                 <div style={{
-                  padding: "0.5rem 0.75rem", borderRadius: 10, margin: "0.5rem 0",
+                  fontSize: "0.72rem", color: "#a8a29e", marginBottom: "0.5rem",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: "50%",
+                    background: region?.color || "#f59e0b",
+                    animation: "micPulse 1s ease-in-out infinite",
+                    display: "inline-block",
+                  }} />
+                  Speak naturally — I understand full sentences
+                </div>
+              )}
+
+              {/* Last heard */}
+              {lastHeard && (
+                <div style={{
+                  padding: "0.5rem 0.75rem", borderRadius: 10, marginBottom: "0.75rem",
                   background: (region?.color || "#f59e0b") + "18",
                   border: `1px solid ${region?.color || "#f59e0b"}33`,
                   fontSize: "0.75rem", color: "#a8a29e",
                 }}>
-                  <span style={{ color: region?.color || "#f59e0b", fontWeight: 600 }}>Heard: </span>"{lastHeard}"
+                  <span style={{ color: region?.color || "#f59e0b", fontWeight: 600 }}>You said: </span>"{lastHeard}"
                 </div>
               )}
-              {micError && (
-                <div style={{ fontSize: "0.72rem", color: "#f87171", marginBottom: "0.5rem" }}>{micError}</div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.5rem",
-                }}
-              >
+
+              {/* Free-form text input */}
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
                 <input
                   value={voiceCommand}
                   onChange={(e) => setVoiceCommand(e.target.value)}
-                  onKeyPress={(e) =>
-                    e.key === "Enter" && handleVoiceCommand(voiceCommand)
-                  }
-                  placeholder={'"next", "analyze", "start timer"'}
+                  onKeyPress={(e) => {
+                    if (e.key === "Enter" && voiceCommand.trim()) {
+                      handleVoiceCommand(voiceCommand);
+                      setVoiceCommand("");
+                    }
+                  }}
+                  placeholder="Ask anything... e.g. what do I do next?"
                   style={{
+                    flex: 1,
                     background: "rgba(255,255,255,0.05)",
                     border: "1px solid rgba(255,255,255,0.08)",
                     borderRadius: 12,
@@ -8732,62 +8730,35 @@ Respond with ONLY the action name. No explanation, no punctuation, just the acti
                   }}
                 />
                 <button
-                  onClick={() => handleVoiceCommand(voiceCommand)}
+                  onClick={() => {
+                    if (voiceCommand.trim()) {
+                      handleVoiceCommand(voiceCommand);
+                      setVoiceCommand("");
+                    }
+                  }}
                   style={{
-                    padding: "0.55rem",
+                    padding: "0.6rem 1rem",
                     borderRadius: 12,
                     border: "none",
                     background: region?.color || "#f59e0b",
                     color: "#fff",
-                    fontWeight: 600,
+                    fontWeight: 700,
                     cursor: "pointer",
                     fontFamily: "inherit",
                     fontSize: "0.82rem",
+                    flexShrink: 0,
                   }}
                 >
-                  Execute
+                  Send
                 </button>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: "0.35rem",
-                    marginTop: "0.25rem",
-                  }}
-                >
-                  {[
-                    "next step",
-                    "go back",
-                    "repeat",
-                    "start timer",
-                    "how long",
-                    "check my cooking",
-                    "what step am I on",
-                    "list ingredients",
-                    "help",
-                    "go home",
-                  ].map((cmd) => (
-                    <span
-                      key={cmd}
-                      onClick={() => handleVoiceCommand(cmd)}
-                      title="Click to trigger or say aloud"
-                      style={{
-                        background: "rgba(255,255,255,0.04)",
-                        color: "#78716c",
-                        fontSize: "0.68rem",
-                        padding: "3px 9px",
-                        borderRadius: 50,
-                        cursor: "pointer",
-                        border: "1px solid rgba(255,255,255,0.06)",
-                        transition: "all 0.15s",
-                      }}
-                      onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.09)"; e.target.style.color = "#e7e5e4"; }}
-                      onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.04)"; e.target.style.color = "#78716c"; }}
-                    >
-                      "{cmd}"
-                    </span>
-                  ))}
-                </div>
+              </div>
+
+              {/* Subtle hint */}
+              <div style={{ fontSize: "0.68rem", color: "#57534e", marginTop: "0.6rem", textAlign: "center" }}>
+                Say or type anything — AI understands natural language
+              </div>
+
+              <div style={{ display: "none" }}>{/* removed fixed command chips */}</div>
               </div>
             </div>
 
